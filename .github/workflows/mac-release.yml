@@ -1,0 +1,53 @@
+name: Build Mac app
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'scripts/stage-desktop.mjs'
+      - 'scripts/package-mac.mjs'
+      - 'scripts/create-icon.mjs'
+      - '.github/workflows/mac-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: mac-release
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.11.0'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test and check types
+        run: |
+          pnpm test
+          pnpm typecheck
+      - name: Build web app
+        run: pnpm build
+      - name: Build desktop app
+        run: pnpm build:desktop
+      - name: Package and smoke-test Apple silicon app
+        run: pnpm package:mac
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thought-Buffer-apple-silicon
+          path: outputs/releases/*
+          if-no-files-found: error
+      - name: Publish private repository release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p 'JSON.parse(require("fs").readFileSync("package.json","utf8")).version')
+          TAG="v${VERSION}-mac.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" outputs/releases/* --target "$GITHUB_SHA" --title "Thought Buffer ${VERSION} for Apple silicon" --notes-file desktop/RELEASE.md

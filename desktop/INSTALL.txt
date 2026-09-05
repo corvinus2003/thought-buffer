@@ -1,0 +1,21 @@
+THOUGHT BUFFER — APPLE SILICON MAC
+
+1. Open the disk image and drag Thought Buffer into Applications.
+2. Open Thought Buffer from Applications.
+3. Click Connect Luna, paste your API key, and click Connect & verify.
+
+This private family build is ad-hoc signed, not notarized by Apple. macOS may
+ask you to approve it in System Settings > Privacy & Security > Open Anyway.
+Only do this for the download you received from the project owner.
+
+Internet access is needed for GPT-5.6 Luna. Reading your saved collection and
+writing drafts work locally. API usage is billed to the key's OpenAI project.
+
+Your thoughts and connection are saved on your Mac in:
+~/Library/Application Support/Thought Buffer/data/
+
+The download includes no thoughts and no API key. To replace the key later,
+open Connection and enter the new key. Replacing the app with an update keeps
+your data. Do not delete the Application Support folder when updating.
+
+Keep a backup of that data folder if you want a backup of your thoughts.

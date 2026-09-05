@@ -26,3 +26,11 @@ This repository contains the SVO-Codex / Thought Buffer app. Preserve the produc
 Use the existing Sites/Vinext setup, lockfile, and installed components. Local filesystem persistence requires the Node runtime; do not add hosted storage. Build with the project’s build script and run relevant tests and typechecks after logic changes. Tests mock the OpenAI API and must not overwrite personal state.
 
 Use Node.js 22.13 or newer and pnpm. Standard scripts: dev, build, start, test, typecheck. The local API health endpoint includes projectRoot so launchers can distinguish this checkout from stale copies.
+
+## Desktop distribution
+
+- `desktop/` reuses the existing page and API in a sandboxed Electron window.
+- Desktop data lives in `~/Library/Application Support/Thought Buffer/data/`, never inside the app bundle. Do not migrate personal data implicitly.
+- `pnpm build:desktop` stages an explicit allowlist in `work/desktop-app`; `pnpm package:mac` builds the Apple silicon DMG.
+- The family build is ad-hoc signed, not Developer ID signed or notarized. Preserve that disclosure.
+- GitHub release builds run `.github/workflows/mac-release.yml`; no API key is needed in CI. Smoke tests must use temporary userData.

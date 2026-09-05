@@ -1,6 +1,6 @@
 {
   "name": "thought-buffer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -12,7 +12,9 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:desktop": "vite build --config desktop/vite.config.mjs && node scripts/stage-desktop.mjs",
+    "package:mac": "node scripts/package-mac.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

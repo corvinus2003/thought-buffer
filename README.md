@@ -13,6 +13,32 @@ A personal web app for examining a thought before choosing an action. Each thoug
 - Leave a thought pending at any time. After ten reviewed rounds, leave it pending and move on. Further sessions require an explicit choice.
 - Saved history, draft answers, and past decisions remain available when you revisit a thought.
 
+## Standalone Mac app
+
+The Apple silicon edition opens in its own window and bundles its runtime. Download
+its `.dmg` from this repository's Releases, drag Thought Buffer into Applications,
+and enter an API key through **Connect Luna**. The family build is ad-hoc signed,
+not notarized by Apple; see [installation instructions](desktop/INSTALL.txt).
+
+Desktop saves are independent from the local web app and live under
+`~/Library/Application Support/Thought Buffer/data/`. The installer contains no
+personal data or key. Updating the application keeps that folder intact. No
+background web server is required for the desktop edition.
+
+To build the desktop edition on an Apple silicon Mac after installing dependencies:
+
+```sh
+pnpm build:desktop
+pnpm package:mac
+```
+
+Packaging downloads the pinned Electron release, verifies its checksum, stages only
+allowlisted files, signs the app locally, runs a smoke test with temporary data,
+and creates a verified disk image in `outputs/releases/`. The GitHub workflow
+performs the web build, tests, typecheck, desktop build, and packaging before
+publishing a release in this private repository. Run it manually for later updates.
+The packaged app reuses the same React screen and local API as the web edition.
+
 ## Run locally
 
 Use Node.js 22.13 or newer and pnpm. In the project folder:
