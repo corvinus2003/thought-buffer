@@ -1,0 +1,30 @@
+name: Verify downloaded Mac installer
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/verify-mac-installer.mjs'
+      - '.github/workflows/verify-mac-installer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download release, install and launch with Finder
+        run: node scripts/verify-mac-installer.mjs
+      - name: Preserve diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer-diagnostics
+          path: |
+            work/installer-verification/finder.stdout
+            work/installer-verification/finder.stderr
+          if-no-files-found: ignore
