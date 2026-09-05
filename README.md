@@ -20,6 +20,18 @@ its `.dmg` from this repository's Releases, drag Thought Buffer into Application
 and enter an API key through **Connect Luna**. The family build is ad-hoc signed,
 not notarized by Apple; see [installation instructions](desktop/INSTALL.txt).
 
+If macOS says “Thought Buffer.app can’t be opened” after you copy it into
+Applications, open **Terminal** and run:
+
+```sh
+xattr -cr "/Applications/Thought Buffer.app"
+```
+
+Then open Thought Buffer again. Only use this for a download you trust from this
+repository: the command removes all extended attributes from the app and its
+contents, including the quarantine marker used by macOS download checks. It does
+not sign or notarize the app.
+
 Desktop saves are independent from the local web app and live under
 `~/Library/Application Support/Thought Buffer/data/`. The installer contains no
 personal data or key. Updating the application keeps that folder intact. No
@@ -36,7 +48,7 @@ Packaging downloads the pinned Electron release, verifies its checksum, stages o
 allowlisted files, signs the app locally, runs a smoke test with temporary data,
 and creates a verified disk image in `outputs/releases/`. The GitHub workflow
 performs the web build, tests, typecheck, desktop build, and packaging before
-publishing a release in this private repository. Run it manually for later updates.
+publishing a release in this repository. Run it manually for later updates.
 The packaged app reuses the same React screen and local API as the web edition.
 
 ## Run locally
