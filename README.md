@@ -1,17 +1,23 @@
 # Thought Buffer
 
-A personal web app for examining a thought before choosing an action. Each thought starts with an editable subject–verb–object (SVO) rewrite, followed by up to ten rounds of questions and reflection.
+A personal statement translator that turns a vague thought into a concrete external next step, one thought at a time.
 
 ## How it works
 
-- Add at least five thoughts to begin.
-- Review and edit the SVO rewrite without losing the original thought.
-- Choose one of three questions from GPT-5.6 Luna, or write your own question underneath.
-- Write your answer. Review the model’s **What changes** and add your own corrections in the separate box below it.
-- Both change boxes and the thought’s history inform the next three questions.
-- Accept means “I choose to take this specific action”; reject means “I choose not to”. An ordinary yes/no answer does not make that decision.
-- Leave a thought pending at any time. After ten reviewed rounds, leave it pending and move on. Further sessions require an explicit choice.
-- Saved history, draft answers, and past decisions remain available when you revisit a thought.
+1. Enter one thought.
+2. Choose the one of six faithful reframings you identify with most.
+3. Answer one of three narrowing questions about that reframing.
+4. Read **What changes**, remaining uncertainty, and the updated statement. Repeat with six new reframings if needed.
+5. A concrete handoff becomes **Finished**: a specific next step, where or with whom it happens, and what it resolves or accomplishes. Finishing does not mean you have committed to or performed the action.
+6. After ten answered cycles without a handoff, the thought becomes **Pending**. Another session starts only when you choose to resume it.
+
+Keep multiple thoughts with **+ New thought**. The list shows each starting thought, current statement and status. Switching thoughts retains progress and answer drafts. There are no Accept/Reject buttons, custom questions, correction fields, or manual statement editing.
+
+Actor / action or state / target is a practical meaning scaffold. The six reframings shift emphasis without inventing ownership, commitments or motives. Questions narrow toward particulars; they do not ask why. Technical unknowns can become a concrete verification handoff rather than an unsupported answer. Handoffs are displayed, never executed by the app.
+
+### Existing saves
+
+Version 2 retains previous thoughts, drafts, answers, corrections, and decisions as read-only earlier history. Previous Accepted/Rejected entries become Pending, since a past action decision is not a translator handoff. Old cycles do not consume new translator sessions. On the first migrated save, `buffer.before-translator.json` preserves the full earlier save alongside the rotating `buffer.previous.json`. Desktop and web data locations remain separate.
 
 ## Standalone Mac app
 
@@ -31,6 +37,7 @@ Then open Thought Buffer again. Only use this for a download you trust from this
 repository: the command removes all extended attributes from the app and its
 contents, including the quarantine marker used by macOS download checks. It does
 not sign or notarize the app.
+
 
 Desktop saves are independent from the local web app and live under
 `~/Library/Application Support/Thought Buffer/data/`. The installer contains no
@@ -90,4 +97,6 @@ pnpm typecheck
 pnpm test
 ```
 
-Tests use temporary storage and mocked OpenAI responses. They cover the ten-round limit, custom questions, decisions, retained history, persistence, cross-origin protection, and API error handling. Live API access is verified when a user connects a key.
+Tests use temporary storage and mocked OpenAI responses. They cover the translator cycle, required reframing selection, ten-answer boundary, handoff validation, migration, retained drafts/history, persistence, cross-origin protection, and API error handling. Live API access is verified when a user connects a key.
+
+Structured responses use the existing Responses API JSON-schema format; see [official OpenAI documentation](https://developers.openai.com/api/docs/guides/structured-outputs).

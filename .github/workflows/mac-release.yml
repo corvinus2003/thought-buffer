@@ -4,6 +4,14 @@ on:
     branches: [main]
     paths:
       - 'desktop/**'
+      - 'app/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'public/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
       - 'scripts/stage-desktop.mjs'
       - 'scripts/package-mac.mjs'
       - 'scripts/create-icon.mjs'
@@ -44,7 +52,7 @@ jobs:
           name: Thought-Buffer-apple-silicon
           path: outputs/releases/*
           if-no-files-found: error
-      - name: Publish private repository release
+      - name: Publish Mac release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -1,16 +1,13 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
-  Check,
   ChevronRight,
-  Clock3,
   Menu,
   Plus,
   Settings2,
   X,
   LoaderCircle,
-  PencilLine,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -28,29 +25,24 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { useBuffer } from '@/lib/use-buffer';
 import {
-  appendRound,
+  appendReframings,
   changeRound,
+  chooseReframing,
+  setQuestions,
+  completeRound,
   currentRound,
   currentSession,
-  decide,
-  finishReview,
+  answeredRounds,
   newThought,
-  nextThought,
   resumeThought,
-  roundQuestion,
   type BufferState,
   type Thought,
   type Round,
+  type SVO,
+  type Reframing,
+  type Translation,
 } from '@/lib/domain';
 
 function Brand() {
@@ -63,18 +55,33 @@ function Brand() {
     </div>
   );
 }
+function Status({ thought }: { thought: Thought }) {
+  return (
+    <span
+      className={`status status-${thought.status.toLowerCase().replaceAll(' ', '-')}`}
+    >
+      {thought.status}
+    </span>
+  );
+}
 function Navigation({
   data,
   openThought,
   overview,
+  newEntry,
   connection,
 }: {
   data: BufferState;
   openThought: (id: string) => void;
   overview: () => void;
+  newEntry: () => void;
   connection: () => void;
 }) {
   const { toggleSidebar, setOpenMobile } = useSidebar();
+  const navigate = (fn: () => void) => {
+    fn();
+    setOpenMobile(false);
+  };
   return (
     <>
       <Sidebar className="buffer-sidebar">
@@ -82,35 +89,25 @@ function Navigation({
           <Brand />
         </SidebarHeader>
         <SidebarContent className="nav-content">
-          <button
-            className="nav-overview"
-            onClick={() => {
-              overview();
-              setOpenMobile(false);
-            }}
-          >
+          <button className="secondary" onClick={() => navigate(newEntry)}>
+            <Plus size={17} /> New thought
+          </button>
+          <button className="nav-overview" onClick={() => navigate(overview)}>
             All thoughts <span>{data.thoughts.length}</span>
           </button>
-          <p className="eyebrow nav-label">YOUR BUFFER</p>
           {data.thoughts.map((t, i) => (
             <button
               key={t.id}
               className={`thought-nav ${data.activeId === t.id && data.screen === 'thought' ? 'active' : ''}`}
-              onClick={() => {
-                openThought(t.id);
-                setOpenMobile(false);
-              }}
+              onClick={() => navigate(() => openThought(t.id))}
             >
               <span className="nav-number">
                 {String(i + 1).padStart(2, '0')}
               </span>
               <span className="nav-thought">
-                <span>{t.title}</span>
-                <span
-                  className={`status status-${t.status.replaceAll(' ', '-').toLowerCase()}`}
-                >
-                  {t.status}
-                </span>
+                <span>{t.original}</span>
+                <span className="nav-current">Current: {t.current}</span>
+                <Status thought={t} />
               </span>
             </button>
           ))}
@@ -119,7 +116,7 @@ function Navigation({
           <button className="quiet" onClick={connection}>
             <Settings2 size={17} /> Connection
           </button>
-          <span className="small muted">Your pace. Your decision.</span>
+          <span className="small muted">One thought at a time.</span>
         </SidebarFooter>
       </Sidebar>
       <button
@@ -132,6 +129,123 @@ function Navigation({
     </>
   );
 }
+function Changes({ result }: { result: Translation }) {
+  return (
+    <section className="translation-changes" aria-label="What changes">
+      <h2>What changes</h2>
+      <p className="preserve">{result.changes}</p>
+      {result.unresolved && (
+        <p className="muted preserve">
+          <strong>Still unresolved: </strong>
+          {result.unresolved}
+        </p>
+      )}
+    </section>
+  );
+}
+function History({ thought }: { thought: Thought }) {
+  const completed = thought.sessions.flatMap((s, si) =>
+    s.rounds.filter((r) => r.stage === 'done').map((r, ri) => ({ r, si, ri })),
+  );
+  return (
+    <>
+      {completed.length > 0 && (
+        <details className="translation-history">
+          <summary>Cycle history ({completed.length})</summary>
+          {completed.map(({ r, si, ri }) => (
+            <article key={r.id} className="history-cycle">
+              <h2>
+                Session {si + 1} · Cycle {ri + 1}
+              </h2>
+              <p>
+                <strong>Starting statement: </strong>
+                {r.seed}
+              </p>
+              <p>
+                <strong>Your reframing: </strong>
+                {r.reframings.find((x) => x.order === r.chosen)?.text}
+              </p>
+              <p>
+                <strong>Question: </strong>
+                {r.selected}
+              </p>
+              <p className="preserve">
+                <strong>Your answer: </strong>
+                {r.answer}
+              </p>
+              {r.result && (
+                <>
+                  <Changes result={r.result} />
+                  <p>
+                    <strong>Updated statement: </strong>
+                    {r.result.svo.rewrite}
+                  </p>
+                  {r.result.handoff && (
+                    <p>
+                      <strong>Handoff: </strong>
+                      {r.result.handoff.step} · {r.result.handoff.destination} ·{' '}
+                      {r.result.handoff.purpose}
+                    </p>
+                  )}
+                </>
+              )}
+            </article>
+          ))}
+        </details>
+      )}
+      {thought.legacy && (
+        <details className="translation-history">
+          <summary>Earlier app history · {thought.legacy.status}</summary>
+          <p className="small muted">
+            Preserved from the previous workflow. These rounds do not count
+            toward translator sessions.
+          </p>
+          {thought.legacy.current && (
+            <p>
+              <strong>Previous statement: </strong>
+              {thought.legacy.current}
+            </p>
+          )}
+          {thought.legacy.action && (
+            <p>
+              <strong>Previous action: </strong>
+              {thought.legacy.action}
+            </p>
+          )}
+          {thought.legacy.sessions
+            ?.flatMap((s) => s.rounds)
+            .map((r, i) => (
+              <article key={`${r.id}-${i}`} className="history-cycle">
+                <p>
+                  <strong>Question: </strong>
+                  {r.custom?.trim() || r.selected}
+                </p>
+                <p className="preserve">
+                  <strong>Answer: </strong>
+                  {r.answer}
+                </p>
+                <p className="preserve">
+                  <strong>What changes: </strong>
+                  {r.aiChanges}
+                </p>
+                {r.userChanges && (
+                  <p className="preserve">
+                    <strong>Your additions: </strong>
+                    {r.userChanges}
+                  </p>
+                )}
+              </article>
+            ))}
+          {thought.legacy.decisions?.map((d, i) => (
+            <p key={i}>
+              {d.at} · {d.choice} · {d.action}
+            </p>
+          ))}
+        </details>
+      )}
+    </>
+  );
+}
 export default function Home() {
   const { data, update, ready, saveStatus, saveError, retrySave } = useBuffer();
   const [connected, setConnected] = useState(false),
@@ -139,8 +253,10 @@ export default function Home() {
     [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState<string | null>(null),
     [error, setError] = useState(''),
-    [connectionError, setConnectionError] = useState(''),
+    [errorThought, setErrorThought] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState(''),
     [checking, setChecking] = useState(false);
+  const running = useRef(false);
   useEffect(() => {
     fetch('/api/connection')
       .then((r) => r.json())
@@ -152,15 +268,15 @@ export default function Home() {
   const thought = data.thoughts.find((t) => t.id === data.activeId);
   const round = thought && currentRound(thought);
   const session = thought && currentSession(thought);
-  const editable =
-    thought?.status === 'In progress' || thought?.status === 'Not started';
+  const latestResult = thought?.sessions
+    .flatMap((s) => s.rounds)
+    .filter((r) => r.result)
+    .at(-1)?.result;
   const modify = (id: string, fn: (t: Thought) => Thought) =>
     update((s) => ({
       ...s,
       thoughts: s.thoughts.map((t) => (t.id === id ? fn(t) : t)),
     }));
-  const patch = (changes: Partial<Thought>) =>
-    thought && modify(thought.id, (t) => ({ ...t, ...changes }));
   const patchRound = (changes: Partial<Round>) =>
     thought && modify(thought.id, (t) => changeRound(t, changes));
   const openThought = (id: string) => {
@@ -171,81 +287,82 @@ export default function Home() {
     setError('');
     update((s) => ({ ...s, activeId: null, screen: 'list' }));
   };
-  const call = async (kind: string, t: Thought) => {
+  const newEntry = () => {
+    setError('');
+    update((s) => ({ ...s, activeId: null, screen: 'entry' }));
+  };
+  const call = async <T,>(kind: string, t: Thought): Promise<T> => {
     const response = await fetch('/api/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind, thought: t }),
     });
-    const result = (await response.json()) as {
-      error?: string;
-      subject: string;
-      verb: string;
-      object: string;
-      rewrite: string;
-      action: string;
-      questions: string[];
-      changes: string;
-    };
+    const result = (await response.json()) as { error?: string };
     if (!response.ok) {
-      if (response.status === 428) setConnectionOpen(true);
+      if (response.status === 428) {
+        setConnected(false);
+        setConnectionOpen(true);
+      }
       throw new Error(result.error || 'Please try again.');
     }
-    return result;
+    return result as T;
   };
   const run = async (id: string, fn: () => Promise<void>) => {
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     setBusy(id);
     setError('');
+    setErrorThought(id);
     try {
       await fn();
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Something went wrong. Please try again.',
-      );
+      setError(e instanceof Error ? e.message : 'Please try again.');
     } finally {
+      running.current = false;
       setBusy(null);
     }
   };
-  const rewrite = (t: Thought) =>
+  const generateReframings = async (t: Thought) => {
+    const result = await call<{ svo: SVO; reframings: Reframing[] }>(
+      'reframings',
+      t,
+    );
+    modify(t.id, (latest) =>
+      appendReframings(latest, result.svo, result.reframings),
+    );
+  };
+  const beginCycle = (t: Thought) => run(t.id, () => generateReframings(t));
+  const getQuestions = (t: Thought) =>
     run(t.id, async () => {
-      const result = await call('svo', t);
-      modify(t.id, (latest) => ({
-        ...latest,
-        svo: {
-          subject: result.subject,
-          verb: result.verb,
-          object: result.object,
-          rewrite: result.rewrite,
-        },
-        current: result.rewrite,
-        action: result.action,
-        status: 'In progress',
-      }));
-    });
-  const questions = (t: Thought) =>
-    run(t.id, async () => {
-      const result = await call('questions', t);
-      modify(t.id, (latest) => appendRound(latest, result.questions));
+      const result = await call<{ questions: string[] }>('questions', t);
+      modify(t.id, (latest) => setQuestions(latest, result.questions));
     });
   const submitAnswer = (t: Thought) =>
     run(t.id, async () => {
-      const result = await call('changes', t);
-      modify(t.id, (latest) =>
-        changeRound(latest, { aiChanges: result.changes, stage: 'review' }),
-      );
+      const result = await call<Translation>('changes', t);
+      const translated = completeRound(t, result);
+      modify(t.id, () => translated);
+      if (translated.status === 'In progress')
+        await generateReframings(translated);
     });
-  const advance = (t: Thought) => {
-    const updated = finishReview(t);
-    if (updated.status === 'Pending') {
-      update((s) => nextThought(s, updated));
-      setError('');
-    } else {
-      modify(t.id, () => updated);
-      void questions(updated);
-    }
+  const resume = (t: Thought) => {
+    if (running.current) return;
+    const resumed = resumeThought(t);
+    modify(t.id, () => resumed);
+    if (connected) void beginCycle(resumed);
+  };
+  const addThought = () => {
+    const text = data.thoughts.length ? data.addDraft : data.drafts[0];
+    if (!text.trim() || running.current) return;
+    const added = newThought(text);
+    update((s) => ({
+      ...s,
+      thoughts: [...s.thoughts, added],
+      activeId: added.id,
+      screen: 'thought',
+      ...(s.thoughts.length ? { addDraft: '' } : { drafts: [''] }),
+    }));
+    if (connected) void beginCycle(added);
   };
   const saveConnection = async () => {
     setChecking(true);
@@ -256,16 +373,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: apiKey }),
       });
-      const result = (await response.json()) as {
-        error?: string;
-        subject: string;
-        verb: string;
-        object: string;
-        rewrite: string;
-        action: string;
-        questions: string[];
-        changes: string;
-      };
+      const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error);
       setConnected(true);
       setApiKey('');
@@ -276,43 +384,25 @@ export default function Home() {
       setChecking(false);
     }
   };
-  const decideNow = (choice: 'Accepted' | 'Rejected') => {
-    if (thought) {
-      const updated = decide(thought, choice);
-      modify(thought.id, () => updated);
-    }
-  };
-  const pending = () =>
-    thought && update((s) => nextThought(s, { ...thought, status: 'Pending' }));
   const entry = data.screen === 'entry';
+  const hasThoughts = data.thoughts.length > 0;
+  const entryDraft = hasThoughts ? data.addDraft : data.drafts[0];
   return (
     <SidebarProvider
-      defaultOpen={true}
-      style={{ '--sidebar-width': '270px' } as React.CSSProperties}
+      defaultOpen
+      style={{ '--sidebar-width': '290px' } as React.CSSProperties}
     >
-      {!entry && (
+      {hasThoughts && (
         <Navigation
           data={data}
           openThought={openThought}
           overview={overview}
+          newEntry={newEntry}
           connection={() => setConnectionOpen(true)}
         />
       )}
-      <main className={entry ? 'entry' : 'workspace'}>
-        {entry ? (
-          <div className="entry-top">
-            <Brand />
-            <button
-              className="quiet small"
-              onClick={() => setConnectionOpen(true)}
-            >
-              <span
-                className={`connection-dot ${connected ? 'connected' : ''}`}
-              />
-              {connected ? 'Luna connected' : 'Connect Luna'}
-            </button>
-          </div>
-        ) : (
+      <main className={hasThoughts ? 'workspace' : 'entry'}>
+        {hasThoughts ? (
           <header className="topbar">
             <span className="breadcrumb">
               Your buffer{' '}
@@ -326,20 +416,33 @@ export default function Home() {
             <span className="save-state" role="status">
               {saveStatus}
             </span>
-            {data.screen === 'thought' && (
+            {data.screen !== 'list' && (
               <button
                 className="icon-button"
-                aria-label="Close thought and return to list"
+                aria-label="Close and return to thought list"
                 onClick={overview}
               >
                 <X size={21} />
               </button>
             )}
           </header>
+        ) : (
+          <div className="entry-top">
+            <Brand />
+            <button
+              className="quiet small"
+              onClick={() => setConnectionOpen(true)}
+            >
+              <span
+                className={`connection-dot ${connected ? 'connected' : ''}`}
+              />
+              {connected ? 'Luna connected' : 'Connect Luna'}
+            </button>
+          </div>
         )}
         {saveError && (
           <div role="alert" className="notice error">
-            {saveError}{' '}
+            {saveError}
             <button onClick={() => void retrySave()}>Retry save</button>
           </div>
         )}
@@ -349,653 +452,354 @@ export default function Home() {
             {saveStatus}
           </div>
         ) : entry ? (
-          <>
+          <section className="single-entry">
             <div className="intro">
-              <p className="eyebrow">A PLACE TO BEGIN</p>
+              <p className="eyebrow">ONE THOUGHT AT A TIME</p>
               <h1>
-                Give your thoughts
+                Give a thought
                 <br />a little room.
               </h1>
-              <p>Add at least five thoughts that you want to deconstruct.</p>
+              <p>
+                Start with what’s on your mind. We’ll work toward a concrete
+                next step.
+              </p>
             </div>
-            <div className="thought-inputs">
-              {data.drafts.map((v, i) => (
-                <label className="thought-input" key={i}>
-                  <span>{String(i + 1).padStart(2, '0')}</span>
-                  <textarea
-                    maxLength={8000}
-                    aria-label={`Thought ${i + 1}`}
-                    placeholder="Write a thought, just as it arrives…"
-                    value={v}
-                    onChange={(e) =>
-                      update((s) => ({
-                        ...s,
-                        drafts: s.drafts.map((text, j) =>
-                          j === i ? e.target.value : text,
-                        ),
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="actions">
-              <button
-                className="secondary"
-                onClick={() =>
-                  update((s) => ({ ...s, drafts: [...s.drafts, ''] }))
-                }
-              >
-                <Plus size={17} />
-                Add another thought
-              </button>
-              <div className="inline">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                addThought();
+              }}
+            >
+              <label className="field-label" htmlFor="original-thought">
+                Your thought
+              </label>
+              <textarea
+                id="original-thought"
+                className="original-input"
+                maxLength={8000}
+                placeholder="Write a thought, just as it arrives…"
+                value={entryDraft}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  update((s) =>
+                    hasThoughts
+                      ? { ...s, addDraft: value }
+                      : { ...s, drafts: [value] },
+                  );
+                }}
+              />
+              <div className="actions">
                 <span className="small muted">
-                  {data.drafts.filter((v) => v.trim()).length} / 5 minimum
+                  Choose a reframing. Answer a question. Get clearer.
                 </span>
                 <button
                   className="primary"
-                  disabled={data.drafts.filter((v) => v.trim()).length < 5}
-                  onClick={() =>
-                    update((s) => {
-                      const thoughts = s.drafts
-                        .filter((v) => v.trim())
-                        .map(newThought);
-                      return {
-                        ...s,
-                        thoughts,
-                        drafts: ['', '', '', '', ''],
-                        activeId: thoughts[0].id,
-                        screen: 'thought',
-                      };
-                    })
-                  }
+                  disabled={!!busy || !entryDraft?.trim()}
+                  type="submit"
                 >
-                  Begin
-                  <ArrowRight size={18} />
+                  Begin <ArrowRight size={18} />
                 </button>
               </div>
-            </div>
+            </form>
             <p className="entry-note small muted">
-              {saveStatus}. You can leave any thought unresolved.
+              {saveStatus}. Unresolved after ten cycles? It can wait in Pending.
             </p>
-          </>
+          </section>
         ) : data.screen === 'list' || !thought ? (
           <section className="overview">
-            <p className="eyebrow">YOUR COLLECTION</p>
-            <h1>A little more perspective.</h1>
-            <p className="muted">Pick up a thought wherever you left it.</p>
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">YOUR COLLECTION</p>
+                <h1>Your thoughts.</h1>
+              </div>
+              <button className="primary" onClick={newEntry}>
+                <Plus size={17} /> New thought
+              </button>
+            </div>
+            <p className="muted">
+              The starting thought stays. The current statement evolves.
+            </p>
             <div className="collection">
-              {data.thoughts.map((t, i) => (
+              {data.thoughts.map((t) => (
                 <button
                   className="collection-item"
                   key={t.id}
                   onClick={() => openThought(t.id)}
                 >
-                  <span className="nav-number">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
                   <span className="collection-text">
+                    <span className="source-label">STARTING THOUGHT</span>
                     {t.original}
                     <small>
-                      {t.decisions.at(-1) &&
-                      ['Accepted', 'Rejected'].includes(t.status)
-                        ? `${t.status === 'Accepted' ? 'YES' : 'NO'} · ${t.decisions.at(-1)!.action}`
-                        : `${t.sessions.reduce((n, s) => n + s.rounds.filter((r) => r.stage !== 'answer').length, 0)} answered rounds`}
+                      <strong>Current statement: </strong>
+                      {t.current}
                     </small>
                   </span>
-                  <span
-                    className={`status status-${t.status.replaceAll(' ', '-').toLowerCase()}`}
-                  >
-                    {t.status}
-                  </span>
+                  <Status thought={t} />
                   <ChevronRight size={18} />
                 </button>
               ))}
             </div>
-            <div className="add-thought">
-              <label htmlFor="add-thought">Another thought on your mind?</label>
-              <textarea
-                id="add-thought"
-                maxLength={8000}
-                value={data.addDraft}
-                placeholder="Write it here…"
-                onChange={(e) =>
-                  update((s) => ({ ...s, addDraft: e.target.value }))
-                }
-              />
+            {data.drafts[0]?.trim() && (
               <button
                 className="secondary"
-                disabled={!data.addDraft.trim()}
-                onClick={() =>
+                onClick={() => {
                   update((s) => ({
                     ...s,
-                    thoughts: [...s.thoughts, newThought(s.addDraft)],
-                    addDraft: '',
-                  }))
-                }
+                    addDraft: s.drafts[0],
+                    drafts: [''],
+                    screen: 'entry',
+                  }));
+                }}
               >
-                <Plus size={17} />
-                Add thought
+                Continue saved starting draft
               </button>
-            </div>
+            )}
           </section>
         ) : (
-          <section className="thought-work">
+          <section className="thought-work translator-work">
             <div className="thought-title">
               <div>
-                <p className="eyebrow">
-                  THOUGHT{' '}
-                  {String(data.thoughts.indexOf(thought) + 1).padStart(2, '0')}
+                <p className="eyebrow">STARTING THOUGHT</p>
+                <p className="original-statement preserve">
+                  {thought.original}
                 </p>
-                <h1>{thought.original}</h1>
               </div>
-              <span
-                className={`status status-${thought.status.replaceAll(' ', '-').toLowerCase()}`}
-              >
-                {thought.status}
-              </span>
+              <Status thought={thought} />
             </div>
-            {error && (
+            <section className="current-statement">
+              <p className="eyebrow">CURRENT STATEMENT</p>
+              <h1>{thought.current}</h1>
+              {thought.svo && (
+                <dl className="meaning-grid">
+                  <div>
+                    <dt>Actor</dt>
+                    <dd>{thought.svo.subject}</dd>
+                  </div>
+                  <div>
+                    <dt>Action or state</dt>
+                    <dd>{thought.svo.verb}</dd>
+                  </div>
+                  <div>
+                    <dt>Target</dt>
+                    <dd>{thought.svo.object}</dd>
+                  </div>
+                </dl>
+              )}
+            </section>
+            {latestResult && <Changes result={latestResult} />}
+            {error && errorThought === thought.id && (
               <div className="notice error" role="alert">
                 {error}
               </div>
             )}
-            {!connected && (
+            {!connected && thought.status === 'In progress' && (
               <div className="notice">
-                Connect GPT-5.6 Luna to start the questions. Your thoughts stay
-                saved while you set it up.
+                Connect Luna to continue. Your thought is saved.
                 <button onClick={() => setConnectionOpen(true)}>
-                  Connect Luna <ArrowRight size={15} />
+                  Connect Luna <ArrowRight size={16} />
                 </button>
               </div>
             )}
-            {!thought.svo ? (
-              <div className="svo-start">
-                <span className="step-number">01</span>
-                <h2>Find the subject, verb, and object.</h2>
-                <p className="muted">
-                  Start with an editable rewrite. Keep the meaning yours.
-                </p>
-                <button
-                  className="primary"
-                  disabled={!!busy || !connected || !editable}
-                  onClick={() => void rewrite(thought)}
-                >
-                  {busy === thought.id ? (
-                    <LoaderCircle className="spin" size={18} />
-                  ) : (
-                    <PencilLine size={18} />
-                  )}
-                  Rewrite into SVO
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="svo-section">
-                  <div className="section-heading">
-                    <h2>Subject · Verb · Object</h2>
-                    <span className="small muted">
-                      {thought.confirmed
-                        ? 'Starting interpretation'
-                        : 'Review your starting interpretation'}
-                    </span>
-                  </div>
-                  <fieldset disabled={!!busy || !editable}>
-                    <div className="svo-grid">
-                      {(['subject', 'verb', 'object'] as const).map(
-                        (part, i) => (
-                          <label key={part}>
-                            <span className="svo-label">
-                              <b>{['S', 'V', 'O'][i]}</b>
-                              {part}
-                            </span>
-                            <input
-                              maxLength={8000}
-                              aria-label={`SVO ${part}`}
-                              value={thought.svo![part]}
-                              onChange={(e) =>
-                                patch({
-                                  svo: {
-                                    ...thought.svo!,
-                                    [part]: e.target.value,
-                                  },
-                                })
-                              }
-                            />
-                          </label>
-                        ),
-                      )}
-                    </div>
-                    <label className="field-label">
-                      SVO rewrite
-                      <textarea
-                        maxLength={8000}
-                        value={thought.svo.rewrite}
-                        onChange={(e) =>
-                          patch({
-                            svo: { ...thought.svo!, rewrite: e.target.value },
-                            ...(!thought.confirmed
-                              ? { current: e.target.value }
-                              : {}),
-                          })
-                        }
-                      />
-                    </label>
-                  </fieldset>
-                  {!thought.confirmed && (
-                    <div className="actions">
-                      <p className="small muted">
-                        Edit anything that doesn’t fit.
-                      </p>
-                      <button
-                        className="primary"
-                        disabled={
-                          !!busy || !editable || !thought.svo.rewrite.trim()
-                        }
-                        onClick={() => {
-                          const t = {
-                            ...thought,
-                            confirmed: true,
-                            status: 'In progress' as const,
-                          };
-                          modify(thought.id, () => t);
-                          if (connected) void questions(t);
-                        }}
-                      >
-                        Use this rewrite
-                        <ArrowRight size={17} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <fieldset
-                  disabled={!!busy || !editable}
-                  className="current-fields"
-                >
-                  <label>
-                    <span className="field-label">Current thought</span>
-                    <textarea
-                      maxLength={8000}
-                      value={thought.current}
-                      onChange={(e) => patch({ current: e.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span className="field-label">Action being considered</span>
-                    <textarea
-                      maxLength={8000}
-                      value={thought.action}
-                      placeholder="Name the specific action you might take…"
-                      onChange={(e) => patch({ action: e.target.value })}
-                    />
-                  </label>
-                </fieldset>
-                {thought.confirmed && (
-                  <>
-                    <div className="section-heading round-heading">
-                      <h2>Make a little more sense of it.</h2>
-                      <span className="round-counter">
-                        Session {thought.sessions.length || 1} · Round{' '}
-                        {session?.rounds.length || 1} of 10
-                      </span>
-                    </div>
-                    <Table className="round-table">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>
-                            <span>01</span> Question
-                          </TableHead>
-                          <TableHead>
-                            <span>02</span> Your answer
-                          </TableHead>
-                          <TableHead>
-                            <span>03</span> What changes
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {thought.sessions.flatMap((s, si) =>
-                          s.rounds.map((r, ri) => {
-                            const active = r.id === round?.id && !!editable;
-                            return (
-                              <TableRow
-                                key={r.id}
-                                className={
-                                  active ? 'active-round' : 'past-round'
-                                }
-                              >
-                                <TableCell>
-                                  <span className="round-meta">
-                                    Session {si + 1} / Round {ri + 1}
-                                  </span>
-                                  {active && r.stage === 'answer' ? (
-                                    <fieldset disabled={!!busy}>
-                                      <RadioGroup
-                                        aria-label="Choose a question"
-                                        value={
-                                          r.custom.trim() ? '' : r.selected
-                                        }
-                                        onValueChange={(v) =>
-                                          patchRound({
-                                            selected: String(v),
-                                            custom: '',
-                                          })
-                                        }
-                                      >
-                                        {r.options.map((q, qi) => (
-                                          <label
-                                            className={`question-option ${!r.custom.trim() && r.selected === q ? 'selected' : ''}`}
-                                            key={q}
-                                          >
-                                            <RadioGroupItem
-                                              value={q}
-                                              aria-label={q}
-                                            />
-                                            <span>
-                                              <small>
-                                                {String(qi + 1).padStart(
-                                                  2,
-                                                  '0',
-                                                )}
-                                              </small>
-                                              {q}
-                                            </span>
-                                          </label>
-                                        ))}
-                                      </RadioGroup>
-                                      <label className="own-label">
-                                        Or write your own question
-                                        <textarea
-                                          maxLength={8000}
-                                          aria-label="Your own question"
-                                          placeholder="What would you like to ask?"
-                                          value={r.custom}
-                                          onChange={(e) =>
-                                            patchRound({
-                                              custom: e.target.value,
-                                            })
-                                          }
-                                        />
-                                      </label>
-                                    </fieldset>
-                                  ) : (
-                                    <>
-                                      <p>{roundQuestion(r)}</p>
-                                      <details>
-                                        <summary>Question options</summary>
-                                        {r.options.map((q) => (
-                                          <p className="small muted" key={q}>
-                                            {q}
-                                          </p>
-                                        ))}
-                                        {r.custom && (
-                                          <p className="small">
-                                            Your question: {r.custom}
-                                          </p>
-                                        )}
-                                      </details>
-                                    </>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  {active && r.stage === 'answer' ? (
-                                    <>
-                                      <label
-                                        className="sr-only"
-                                        htmlFor={`answer-${r.id}`}
-                                      >
-                                        Your answer
-                                      </label>
-                                      <textarea
-                                        id={`answer-${r.id}`}
-                                        className="answer-box"
-                                        maxLength={12000}
-                                        placeholder="Take your time. What comes to mind?"
-                                        value={r.answer}
-                                        disabled={!!busy}
-                                        onChange={(e) =>
-                                          patchRound({ answer: e.target.value })
-                                        }
-                                      />
-                                      <button
-                                        className="primary full"
-                                        disabled={
-                                          !!busy ||
-                                          !r.answer.trim() ||
-                                          !roundQuestion(r).trim() ||
-                                          !connected
-                                        }
-                                        onClick={() =>
-                                          void submitAnswer(thought)
-                                        }
-                                      >
-                                        {busy === thought.id ? (
-                                          <LoaderCircle
-                                            className="spin"
-                                            size={17}
-                                          />
-                                        ) : null}
-                                        Review my answer
-                                        <ArrowRight size={17} />
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <p className="preserve">{r.answer}</p>
-                                      {active && r.stage === 'review' && (
-                                        <button
-                                          className="quiet small"
-                                          disabled={!!busy}
-                                          onClick={() =>
-                                            patchRound({ stage: 'answer' })
-                                          }
-                                        >
-                                          Edit answer
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  {r.aiChanges ? (
-                                    <>
-                                      <div className="ai-change">
-                                        <span className="source-label">
-                                          LUNA
-                                        </span>
-                                        <p>{r.aiChanges}</p>
-                                      </div>
-                                      {active && r.stage === 'review' ? (
-                                        <>
-                                          <label className="own-label">
-                                            Your additions or corrections
-                                            <textarea
-                                              maxLength={12000}
-                                              aria-label="Your changes"
-                                              placeholder="What else changed—or what did Luna misunderstand?"
-                                              value={r.userChanges}
-                                              disabled={!!busy}
-                                              onChange={(e) =>
-                                                patchRound({
-                                                  userChanges: e.target.value,
-                                                })
-                                              }
-                                            />
-                                          </label>
-                                          <p className="small muted">
-                                            Both boxes inform the next
-                                            questions.
-                                          </p>
-                                          <button
-                                            className="primary full"
-                                            disabled={
-                                              !!busy || (ri < 9 && !connected)
-                                            }
-                                            onClick={() => advance(thought)}
-                                          >
-                                            {ri === 9
-                                              ? 'Leave pending & move on'
-                                              : 'Next questions'}
-                                            <ArrowRight size={17} />
-                                          </button>
-                                        </>
-                                      ) : (
-                                        r.userChanges && (
-                                          <div className="your-change">
-                                            <span className="source-label">
-                                              YOU
-                                            </span>
-                                            <p className="preserve">
-                                              {r.userChanges}
-                                            </p>
-                                          </div>
-                                        )
-                                      )}
-                                    </>
-                                  ) : (
-                                    <div className="awaiting">
-                                      <span className="source-label">
-                                        A LITTLE SPACE TO REFLECT
-                                      </span>
-                                      <p>
-                                        Luna will describe what your answer
-                                        changes.
-                                      </p>
-                                      <label className="own-label">
-                                        Your additions or corrections
-                                        <textarea
-                                          disabled
-                                          placeholder="Add anything Luna misses after the review."
-                                        />
-                                      </label>
-                                    </div>
-                                  )}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          }),
-                        )}
-                      </TableBody>
-                    </Table>
-                    {(!round || round.stage === 'done') &&
-                      editable &&
-                      (session?.rounds.length || 0) < 10 && (
-                        <div className="next-row">
-                          <button
-                            className="primary"
-                            disabled={!!busy || !connected}
-                            onClick={() => void questions(thought)}
-                          >
-                            {busy === thought.id ? (
-                              <LoaderCircle className="spin" size={18} />
-                            ) : null}
-                            {round
-                              ? 'Get next questions'
-                              : 'Get three questions'}
-                            <ArrowRight size={17} />
-                          </button>
-                        </div>
-                      )}
-                  </>
-                )}
-              </>
-            )}
-            {editable ? (
-              <div className="decision-bar">
-                <div>
-                  <span className="source-label">YOUR DECISION</span>
-                  <p>
-                    {thought.action.trim() ||
-                      'Name an action above to choose YES or NO.'}
-                  </p>
-                </div>
-                <div className="decision-buttons">
-                  <button
-                    className="accept"
-                    disabled={!!busy || !thought.action.trim()}
-                    onClick={() => decideNow('Accepted')}
-                  >
-                    <Check size={18} />
-                    <span>
-                      YES<small>I choose to do this</small>
-                    </span>
-                  </button>
-                  <button
-                    className="reject"
-                    disabled={!!busy || !thought.action.trim()}
-                    onClick={() => decideNow('Rejected')}
-                  >
-                    <X size={18} />
-                    <span>
-                      NO<small>I choose not to</small>
-                    </span>
-                  </button>
-                  <button className="quiet" disabled={!!busy} onClick={pending}>
-                    <Clock3 size={17} />
-                    Pending
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="resolution">
-                <span className="source-label">
-                  {thought.status === 'Pending'
-                    ? 'ROOM TO COME BACK'
-                    : 'DECISION SAVED'}
-                </span>
-                <h2>
-                  {thought.status === 'Pending'
-                    ? 'This thought can wait.'
-                    : thought.status === 'Accepted'
-                      ? 'You choose to act.'
-                      : 'You choose not to act.'}
-                </h2>
+            {thought.status === 'Finished' && thought.handoff ? (
+              <section
+                className="resolution handoff"
+                aria-label="Finished handoff"
+              >
+                <p className="eyebrow">FINISHED · READY FOR HANDOFF</p>
+                <h2>{thought.handoff.step}</h2>
                 <p>
-                  {thought.status === 'Pending'
-                    ? 'Your wording, answers, and changes are all here when you return.'
-                    : thought.decisions.at(-1)?.action}
+                  <strong>Where or with whom: </strong>
+                  {thought.handoff.destination}
+                </p>
+                <p>
+                  <strong>What this resolves or accomplishes: </strong>
+                  {thought.handoff.purpose}
+                </p>
+                <p className="small muted">
+                  The translation is finished. Taking the next step is up to
+                  you.
+                </p>
+                <div className="actions">
+                  <button className="secondary" onClick={overview}>
+                    All thoughts
+                  </button>
+                  <button className="primary" onClick={newEntry}>
+                    <Plus size={17} /> New thought
+                  </button>
+                </div>
+              </section>
+            ) : thought.status === 'Pending' ? (
+              <section className="resolution">
+                <p className="eyebrow">PENDING</p>
+                <h2>This thought can wait.</h2>
+                <p>
+                  {answeredRounds(thought) >= 10
+                    ? 'Ten answered cycles, with no concrete handoff yet.'
+                    : 'This thought was left pending in the earlier workflow.'}{' '}
+                  Your statement and history are saved.
                 </p>
                 <div className="actions">
                   <button
                     className="secondary"
                     disabled={!!busy}
-                    onClick={() => modify(thought.id, resumeThought)}
+                    onClick={() => resume(thought)}
                   >
-                    {thought.status === 'Pending' &&
-                    (session?.rounds.length || 0) >= 10 &&
-                    round?.stage === 'done'
-                      ? 'Start another 10-round session'
-                      : 'Revisit this thought'}
+                    Start another session
                   </button>
-                  <button
-                    className="primary"
-                    onClick={() => update((s) => nextThought(s, thought))}
-                  >
-                    Move on
-                    <ArrowRight size={17} />
+                  <button className="primary" onClick={newEntry}>
+                    <Plus size={17} /> New thought
                   </button>
                 </div>
-              </div>
+              </section>
+            ) : (
+              <section className="cycle-panel" aria-label="Current cycle">
+                <div className="section-heading">
+                  <h2>
+                    {!round ||
+                    round.stage === 'done' ||
+                    ['reframe', 'questions'].includes(round.stage)
+                      ? 'Which statement do you identify with most?'
+                      : 'Choose one question to answer'}
+                  </h2>
+                  <span className="round-counter">
+                    Session {thought.sessions.length || 1} · Cycle{' '}
+                    {Math.min(
+                      10,
+                      (session?.rounds.length || 0) +
+                        (!round || round.stage === 'done' ? 1 : 0),
+                    )}{' '}
+                    of 10
+                  </span>
+                </div>
+                {!round || round.stage === 'done' ? (
+                  <button
+                    className="primary"
+                    disabled={!!busy || !connected}
+                    onClick={() => void beginCycle(thought)}
+                  >
+                    {busy === thought.id
+                      ? 'Preparing reframings…'
+                      : 'Get six reframings'}
+                    <ArrowRight size={17} />
+                  </button>
+                ) : ['reframe', 'questions'].includes(round.stage) ? (
+                  <>
+                    <RadioGroup
+                      className="reframing-grid"
+                      aria-label="Six reframings"
+                      value={round.chosen}
+                      disabled={!!busy}
+                      onValueChange={(order) =>
+                        modify(thought.id, (t) => chooseReframing(t, order))
+                      }
+                    >
+                      {round.reframings.map((r, i) => (
+                        <label
+                          className={`question-option reframing-option ${round.chosen === r.order ? 'selected' : ''}`}
+                          key={r.order}
+                        >
+                          <RadioGroupItem value={r.order} aria-label={r.text} />
+                          <span>
+                            <small>{String(i + 1).padStart(2, '0')}</small>
+                            {r.text}
+                          </span>
+                        </label>
+                      ))}
+                    </RadioGroup>
+                    <div className="next-row">
+                      <button
+                        className="primary"
+                        disabled={!!busy || !connected || !round.chosen}
+                        onClick={() => void getQuestions(thought)}
+                      >
+                        Get three questions <ArrowRight size={17} />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="chosen-reframing">
+                      <span className="source-label">YOUR REFRAMING</span>
+                      {
+                        round.reframings.find((r) => r.order === round.chosen)
+                          ?.text
+                      }
+                    </p>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void submitAnswer(thought);
+                      }}
+                    >
+                      <fieldset disabled={!!busy}>
+                        <RadioGroup
+                          className="question-list"
+                          aria-label="Three questions"
+                          value={round.selected}
+                          onValueChange={(selected) => patchRound({ selected })}
+                        >
+                          {round.options.map((q, i) => (
+                            <label
+                              key={q}
+                              className={`question-option ${round.selected === q ? 'selected' : ''}`}
+                            >
+                              <RadioGroupItem value={q} aria-label={q} />
+                              <span>
+                                <small>QUESTION {i + 1}</small>
+                                {q}
+                              </span>
+                            </label>
+                          ))}
+                        </RadioGroup>
+                        <label
+                          className="field-label answer-label"
+                          htmlFor="cycle-answer"
+                        >
+                          Your answer
+                          {round.selected && (
+                            <span className="answer-question">
+                              {round.selected}
+                            </span>
+                          )}
+                        </label>
+                        <textarea
+                          id="cycle-answer"
+                          className="answer-box"
+                          maxLength={12000}
+                          placeholder="Answer in your own words…"
+                          value={round.answer}
+                          onChange={(e) =>
+                            patchRound({ answer: e.target.value })
+                          }
+                        />
+                        <div className="next-row">
+                          <button
+                            className="primary"
+                            type="submit"
+                            disabled={
+                              !connected ||
+                              !round.selected ||
+                              !round.answer.trim()
+                            }
+                          >
+                            Translate my answer <ArrowRight size={17} />
+                          </button>
+                        </div>
+                      </fieldset>
+                    </form>
+                  </>
+                )}
+              </section>
             )}
-            {thought.decisions.length > 0 && (
-              <details className="decision-history">
-                <summary>Decision history ({thought.decisions.length})</summary>
-                {thought.decisions.map((d, i) => (
-                  <p key={i} className="small">
-                    {new Date(d.at).toLocaleString()} ·{' '}
-                    {d.choice === 'Accepted' ? 'YES' : 'NO'} · {d.action}
-                  </p>
-                ))}
-              </details>
-            )}
-            {busy === thought.id && (
-              <div className="working-indicator" role="status">
-                <LoaderCircle size={17} className="spin" />
-                Luna is thinking…
-              </div>
-            )}
+            <History thought={thought} />
           </section>
+        )}
+        {busy && (
+          <div className="working-indicator" role="status">
+            <LoaderCircle className="spin" size={17} />
+            Luna is working on thought{' '}
+            {data.thoughts.findIndex((t) => t.id === busy) + 1}…
+          </div>
         )}
       </main>
       <Dialog open={connectionOpen} onOpenChange={setConnectionOpen}>

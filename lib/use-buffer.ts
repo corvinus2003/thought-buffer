@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { emptyState, type BufferState } from './domain';
+import { emptyState, migrateState, type BufferState } from './domain';
 const recoveryKey = 'thought-buffer-unsaved-v1';
 export function useBuffer() {
   const [data, setData] = useState<BufferState>(emptyState);
@@ -74,12 +74,12 @@ export function useBuffer() {
         if (!response.ok) throw new Error(result.error);
         if (stopped) return;
         revision.current = result.revision;
-        let initial = result.data || emptyState();
+        let initial = migrateState(result.data);
         const raw = sessionStorage.getItem(recoveryKey);
         if (raw) {
           const draft = JSON.parse(raw);
           if (draft.revision === result.revision) {
-            initial = draft.data;
+            initial = migrateState(draft.data);
             queued.current = initial;
           } else if (JSON.stringify(draft.data) !== JSON.stringify(initial)) {
             setSaveError(

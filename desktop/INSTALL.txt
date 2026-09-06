@@ -4,7 +4,7 @@ THOUGHT BUFFER — APPLE SILICON MAC
 2. Open Thought Buffer from Applications.
 3. Click Connect Luna, paste your API key, and click Connect & verify.
 
-This private family build is ad-hoc signed, not notarized by Apple. macOS may
+This family build is ad-hoc signed, not notarized by Apple. macOS may
 ask you to approve it in System Settings > Privacy & Security > Open Anyway.
 Only do this for the download you received from the project owner.
 
